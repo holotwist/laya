@@ -15,15 +15,7 @@ pkg_check_modules(NCURSESW REQUIRED IMPORTED_TARGET ncursesw)
 find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
 
-# Fetch nlohmann_json if not found
-include(FetchContent)
-FetchContent_Declare(
-    nlohmann_json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG        v3.11.3
-)
-FetchContent_MakeAvailable(nlohmann_json)
-
+# Includes
 include_directories(include external)
 
 # Core Library Target
@@ -49,7 +41,6 @@ target_include_directories(laya_core PUBLIC
 target_link_libraries(laya_core PUBLIC
     PkgConfig::NCURSESW
     CURL::libcurl
-    nlohmann_json::nlohmann_json
     Threads::Threads
     ${CMAKE_DL_LIBS}
     m

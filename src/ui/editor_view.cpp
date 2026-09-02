@@ -2,7 +2,7 @@
 
 namespace laya::ui {
 
-void EditorView::render(WINDOW* win, const core::LrcDocument& doc, size_t selected_line, core::Milliseconds current_time) {
+void EditorView::render(WINDOW* win, const core::LrcDocument& doc, size_t selected_line, [[maybe_unused]] core::Milliseconds current_time) {
     werase(win);
     box(win, 0, 0);
     mvwprintw(win, 0, 2, " [ Lyrics / Sync Editor ] ");

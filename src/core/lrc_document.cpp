@@ -96,6 +96,11 @@ void LrcDocument::set_tag(const std::string& key, const std::string& value) {
     metadata_[key] = value;
 }
 
-std::optional<std::string> get_tag(const std::string& key);
+std::optional<std::string> LrcDocument::get_tag(const std::string& key) const {
+    if (auto it = metadata_.find(key); it != metadata_.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
 
 } // namespace lrctool::core

@@ -7,8 +7,7 @@ void PlayerView::render(WINDOW* win, const audio::AudioPlayer& player, const cor
     box(win, 0, 0);
     mvwprintw(win, 0, 2, " [ Mini Player & Controls ] ");
 
-    int height, width;
-    getmaxyx(win, height, width);
+    int width = getmaxx(win);
 
     // Playback status
     const char* status_str = "STOPPED";
@@ -45,8 +44,10 @@ void PlayerView::render(WINDOW* win, const audio::AudioPlayer& player, const cor
     // Keybindings Cheat-Sheet
     int help_y = 12;
     mvwprintw(win, help_y++, 2, "Keybindings");
+    mvwprintw(win, help_y++, 2, "o / Ctrl+V: Paste lyrics from clipboard");
     mvwprintw(win, help_y++, 2, "Space     : Play / Pause");
     mvwprintw(win, help_y++, 2, "Tab/Enter : Stamp time & Next line");
+    mvwprintw(win, help_y++, 2, "g         : Jump audio to line time");
     mvwprintw(win, help_y++, 2, "j/k / ↑/↓ : Navigate lines");
     mvwprintw(win, help_y++, 2, "h/l / ←/→ : Seek -5s / +5s");
     mvwprintw(win, help_y++, 2, "[ / ]     : Nudge tag -50ms / +50ms");

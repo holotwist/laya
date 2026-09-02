@@ -1,9 +1,53 @@
 #include "laya/ui/app.hpp"
+#include "laya/net/lrclib_client.hpp"
 #include <clocale>
 #include <thread>
 #include <chrono>
+#include <mutex>
+#include <atomic>
+#include <sstream>
+#include <array>
+#include <cstdio>
+#include <memory>
 
 namespace laya::ui {
+
+namespace {
+std::mutex g_app_mutex;
+std::atomic<bool> g_network_busy{false};
+
+std::string read_system_clipboard() {
+    // Tries Wayland (wl-paste) and X11 (xclip / xsel)
+    const char* cmds[] = {
+        "wl-paste 2>/dev/null",
+        "xclip -selection clipboard -o 2>/dev/null",
+        "xsel --clipboard --output 2>/dev/null"
+    };
+
+    for (const char* cmd : cmds) {
+        std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+        if (!pipe) continue;
+        
+        std::array<char, 512> buffer;
+        std::string output;
+        while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) != nullptr) {
+            output += buffer.data();
+        }
+        if (!output.empty()) {
+            return output;
+        }
+    }
+    return "";
+}
+
+std::string extract_plain_lyrics(const core::LrcDocument& doc) {
+    std::ostringstream oss;
+    for (const auto& line : doc.lines()) {
+        oss << line.text << "\n";
+    }
+    return oss.str();
+}
+} // namespace
 
 App::App(std::filesystem::path audio_path, std::filesystem::path lrc_path)
     : audio_path_(std::move(audio_path)), lrc_path_(std::move(lrc_path)) {
@@ -40,6 +84,8 @@ void App::init_curses() {
         use_default_colors();
         init_pair(1, COLOR_CYAN, -1);
         init_pair(2, COLOR_GREEN, -1);
+        init_pair(3, COLOR_YELLOW, -1);
+        init_pair(4, COLOR_RED, -1);
     }
 }
 
@@ -80,23 +126,42 @@ void App::handle_input(int ch) {
             break;
 
         case KEY_DOWN:
-        case 'j':
+        case 'j': {
+            std::lock_guard lock(g_app_mutex);
             if (selected_line_ + 1 < doc_.lines().size()) {
                 selected_line_++;
             }
             break;
+        }
 
         case KEY_UP:
-        case 'k':
+        case 'k': {
+            std::lock_guard lock(g_app_mutex);
             if (selected_line_ > 0) {
                 selected_line_--;
             }
             break;
+        }
+
+        // Jump audio playback directly to current line's timestamp
+        case 'g':
+        case 'G': {
+            std::lock_guard lock(g_app_mutex);
+            if (selected_line_ < doc_.lines().size()) {
+                const auto& ts = doc_.lines()[selected_line_].timestamp;
+                if (ts.has_value()) {
+                    player_.seek(ts.value());
+                    status_message_ = "Seeked to " + core::format_timestamp(ts.value());
+                }
+            }
+            break;
+        }
 
         // Stamp active audio position to selected line and advance
         case '\t':
         case '\n':
         case KEY_ENTER: {
+            std::lock_guard lock(g_app_mutex);
             if (!doc_.lines().empty()) {
                 doc_.set_timestamp(selected_line_, player_.get_position());
                 status_message_ = "Stamped line " + std::to_string(selected_line_ + 1);
@@ -108,12 +173,14 @@ void App::handle_input(int ch) {
         }
 
         // Clear timestamp on current line
-        case 'c':
+        case 'c': {
+            std::lock_guard lock(g_app_mutex);
             doc_.clear_timestamp(selected_line_);
             status_message_ = "Cleared timestamp on line " + std::to_string(selected_line_ + 1);
             break;
+        }
 
-        // Audio seeking
+        // Audio seeking (-5s / +5s)
         case KEY_LEFT:
         case 'h': {
             auto pos = player_.get_position();
@@ -127,6 +194,7 @@ void App::handle_input(int ch) {
 
         // Nudge active timestamp by ±50ms
         case '[': {
+            std::lock_guard lock(g_app_mutex);
             if (selected_line_ < doc_.lines().size()) {
                 auto ts = doc_.lines()[selected_line_].timestamp;
                 if (ts.has_value() && ts.value() > core::Milliseconds(50)) {
@@ -136,6 +204,7 @@ void App::handle_input(int ch) {
             break;
         }
         case ']': {
+            std::lock_guard lock(g_app_mutex);
             if (selected_line_ < doc_.lines().size()) {
                 auto ts = doc_.lines()[selected_line_].timestamp;
                 if (ts.has_value()) {
@@ -145,14 +214,128 @@ void App::handle_input(int ch) {
             break;
         }
 
-        // Save
+        // Save LRC file
         case 's':
+        case 'S': {
+            std::lock_guard lock(g_app_mutex);
             if (doc_.save_to_file(lrc_path_)) {
                 status_message_ = "Saved to " + lrc_path_.string();
             } else {
                 status_message_ = "Error saving file!";
             }
             break;
+        }
+
+        // Paste / Open lyrics from System Clipboard (o or Ctrl+V)
+        case 'o':
+        case 'O':
+        case 22: { // ASCII 22 = Ctrl+V
+            std::string clip = read_system_clipboard();
+            if (!clip.empty()) {
+                std::lock_guard lock(g_app_mutex);
+                doc_.parse_content(clip);
+                selected_line_ = 0;
+                status_message_ = "Loaded " + std::to_string(doc_.lines().size()) + " lines from clipboard";
+            } else {
+                status_message_ = "Clipboard is empty or (wl-paste/xclip) not installed.";
+            }
+            break;
+        }
+
+        // Fetch from LRCLIB
+        case 'f':
+        case 'F': {
+            if (g_network_busy.load()) {
+                status_message_ = "Network task already running...";
+                break;
+            }
+
+            g_network_busy.store(true);
+            status_message_ = "Fetching lyrics from LRCLIB...";
+
+            std::thread([this]() {
+                net::LrclibClient client;
+                net::TrackMetadata meta;
+
+                {
+                    std::lock_guard lock(g_app_mutex);
+                    meta.track_name = doc_.get_tag("ti").value_or(audio_path_.stem().string());
+                    meta.artist_name = doc_.get_tag("ar").value_or("");
+                    meta.album_name = doc_.get_tag("al").value_or("");
+                    meta.duration_seconds = static_cast<int>(player_.get_duration().count() / 1000);
+                }
+
+                auto result = client.get_lyrics(meta);
+
+                std::lock_guard lock(g_app_mutex);
+                if (result.has_value()) {
+                    if (!result->synced_lyrics.empty()) {
+                        doc_.parse_content(result->synced_lyrics);
+                        status_message_ = "Loaded synced lyrics from LRCLIB!";
+                    } else if (!result->plain_lyrics.empty()) {
+                        doc_.parse_content(result->plain_lyrics);
+                        status_message_ = "Loaded unsynced lyrics from LRCLIB (Ready to sync).";
+                    } else {
+                        status_message_ = "Track found on LRCLIB but has no lyrics.";
+                    }
+                    selected_line_ = 0;
+                } else {
+                    status_message_ = "No matching lyrics found on LRCLIB.";
+                }
+
+                g_network_busy.store(false);
+            }).detach();
+            break;
+        }
+
+        // Publish to LRCLIB (Solves PoW and uploads)
+        case 'p':
+        case 'P': {
+            if (g_network_busy.load()) {
+                status_message_ = "Network task already running";
+                break;
+            }
+
+            g_network_busy.store(true);
+
+            std::thread([this]() {
+                net::LrclibClient client;
+                net::TrackMetadata meta;
+                std::string synced_lyrics;
+                std::string plain_lyrics;
+
+                {
+                    std::lock_guard lock(g_app_mutex);
+                    meta.track_name = doc_.get_tag("ti").value_or(audio_path_.stem().string());
+                    meta.artist_name = doc_.get_tag("ar").value_or("");
+                    meta.album_name = doc_.get_tag("al").value_or("");
+                    meta.duration_seconds = static_cast<int>(player_.get_duration().count() / 1000);
+
+                    synced_lyrics = doc_.serialize();
+                    plain_lyrics = extract_plain_lyrics(doc_);
+                }
+
+                bool success = client.publish_lyrics(
+                    meta,
+                    plain_lyrics,
+                    synced_lyrics,
+                    [this](std::string_view msg) {
+                        std::lock_guard lock(g_app_mutex);
+                        status_message_ = std::string(msg);
+                    }
+                );
+
+                std::lock_guard lock(g_app_mutex);
+                if (success) {
+                    status_message_ = "Successfully published to LRCLIB";
+                } else {
+                    status_message_ = "Failed to publish to LRCLIB.";
+                }
+
+                g_network_busy.store(false);
+            }).detach();
+            break;
+        }
 
         case KEY_RESIZE:
             update_layout();
@@ -165,18 +348,21 @@ void App::run() {
         int ch = getch();
         handle_input(ch);
 
-        // Render views
-        editor_view_.render(editor_win_, doc_, selected_line_, player_.get_position());
-        player_view_.render(player_win_, player_, doc_);
+        {
+            std::lock_guard lock(g_app_mutex);
+            // Render views
+            editor_view_.render(editor_win_, doc_, selected_line_, player_.get_position());
+            player_view_.render(player_win_, player_, doc_);
 
-        // Render status bar
-        werase(status_win_);
-        wattron(status_win_, A_REVERSE);
-        mvwprintw(status_win_, 0, 0, " %s", status_message_.c_str());
-        wattroff(status_win_, A_REVERSE);
-        wrefresh(status_win_);
+            // Render status bar
+            werase(status_win_);
+            wattron(status_win_, A_REVERSE);
+            mvwprintw(status_win_, 0, 0, " %s", status_message_.c_str());
+            wattroff(status_win_, A_REVERSE);
+            wrefresh(status_win_);
+        }
 
-        // Frame rate limit (~30 FPS)
+        // Target ~30 FPS
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
     }
 }
