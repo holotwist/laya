@@ -34,7 +34,20 @@ private:
     WINDOW* player_win_{nullptr};
     WINDOW* status_win_{nullptr};
 
+    enum class AppMode {
+        Sync,
+        Edit
+    };
+
+    void enter_edit_mode();
+    void exit_edit_mode();
+    void handle_sync_input(int ch);
+    void handle_edit_input(int ch);
+
+    AppMode mode_{AppMode::Sync};
     size_t selected_line_{0};
+    size_t cursor_col_{0};
+    std::vector<core::LrcLine> original_snapshot_;
     bool running_{true};
     std::string status_message_{"Ready"};
 };

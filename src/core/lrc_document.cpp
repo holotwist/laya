@@ -103,4 +103,4 @@ std::optional<std::string> LrcDocument::get_tag(const std::string& key) const {
     return std::nullopt;
 }
 
-} // namespace lrctool::core
+} // namespace laya::core

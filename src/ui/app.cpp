@@ -24,8 +24,14 @@ std::string read_system_clipboard() {
         "xsel --clipboard --output 2>/dev/null"
     };
 
+    struct PipeCloser {
+        void operator()(FILE* fp) const {
+            if (fp) pclose(fp);
+        }
+    };
+
     for (const char* cmd : cmds) {
-        std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+        std::unique_ptr<FILE, PipeCloser> pipe(popen(cmd, "r"));
         if (!pipe) continue;
         
         std::array<char, 512> buffer;
@@ -112,14 +118,179 @@ void App::update_layout() {
     status_win_ = newwin(1, max_x, max_y - 1, 0);
 }
 
-void App::handle_input(int ch) {
-    if (ch == ERR) return;
+void App::enter_edit_mode() {
+    mode_ = AppMode::Edit;
+    original_snapshot_ = doc_.lines();
+    if (doc_.lines().empty()) {
+        doc_.lines().push_back({std::nullopt, ""});
+        selected_line_ = 0;
+    }
+    cursor_col_ = (selected_line_ < doc_.lines().size()) ? doc_.lines()[selected_line_].text.size() : 0;
+    curs_set(1);
+    status_message_ = "EDIT MODE (Press 'e' or 'Esc' to exit & preserve unchanged timestamps)";
+}
 
+void App::exit_edit_mode() {
+    mode_ = AppMode::Sync;
+    curs_set(0);
+
+    if (doc_.lines().size() == 1 && doc_.lines()[0].text.empty()) {
+        doc_.lines().clear();
+    }
+
+    std::vector<bool> snapshot_used(original_snapshot_.size(), false);
+
+    for (size_t i = 0; i < doc_.lines().size(); ++i) {
+        auto& line = doc_.lines()[i];
+
+        if (i < original_snapshot_.size() && line.text == original_snapshot_[i].text) {
+            line.timestamp = original_snapshot_[i].timestamp;
+            snapshot_used[i] = true;
+            continue;
+        }
+
+        if (!line.text.empty()) {
+            for (size_t j = 0; j < original_snapshot_.size(); ++j) {
+                if (!snapshot_used[j] && line.text == original_snapshot_[j].text) {
+                    line.timestamp = original_snapshot_[j].timestamp;
+                    snapshot_used[j] = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (selected_line_ >= doc_.lines().size() && !doc_.lines().empty()) {
+        selected_line_ = doc_.lines().size() - 1;
+    }
+    status_message_ = "Switched to Sync Mode. Preserved matching timestamps.";
+}
+
+void App::handle_edit_input(int ch) {
+    auto& lines = doc_.lines();
+
+    switch (ch) {
+        case 'e':
+        case 'E':
+        case 27: // ESC
+            exit_edit_mode();
+            break;
+
+        case KEY_LEFT:
+            if (cursor_col_ > 0) {
+                cursor_col_--;
+            } else if (selected_line_ > 0) {
+                selected_line_--;
+                cursor_col_ = lines[selected_line_].text.size();
+            }
+            break;
+
+        case KEY_RIGHT:
+            if (selected_line_ < lines.size() && cursor_col_ < lines[selected_line_].text.size()) {
+                cursor_col_++;
+            } else if (selected_line_ + 1 < lines.size()) {
+                selected_line_++;
+                cursor_col_ = 0;
+            }
+            break;
+
+        case KEY_UP:
+            if (selected_line_ > 0) {
+                selected_line_--;
+                cursor_col_ = std::min(cursor_col_, lines[selected_line_].text.size());
+            }
+            break;
+
+        case KEY_DOWN:
+            if (selected_line_ + 1 < lines.size()) {
+                selected_line_++;
+                cursor_col_ = std::min(cursor_col_, lines[selected_line_].text.size());
+            }
+            break;
+
+        case KEY_HOME:
+        case 1: // Ctrl+A
+            cursor_col_ = 0;
+            break;
+
+        case KEY_END:
+        case 5: // Ctrl+E
+            if (selected_line_ < lines.size()) {
+                cursor_col_ = lines[selected_line_].text.size();
+            }
+            break;
+
+        case '\n':
+        case KEY_ENTER:
+        case 13: {
+            if (selected_line_ < lines.size()) {
+                std::string current_text = lines[selected_line_].text;
+                std::string left = current_text.substr(0, cursor_col_);
+                std::string right = current_text.substr(cursor_col_);
+
+                lines[selected_line_].text = left;
+                lines.insert(lines.begin() + static_cast<ptrdiff_t>(selected_line_ + 1), {std::nullopt, right});
+
+                selected_line_++;
+                cursor_col_ = 0;
+            }
+            break;
+        }
+
+        case KEY_BACKSPACE:
+        case 127:
+        case 8: {
+            if (selected_line_ < lines.size()) {
+                auto& line = lines[selected_line_];
+                if (cursor_col_ > 0) {
+                    line.text.erase(cursor_col_ - 1, 1);
+                    cursor_col_--;
+                } else if (selected_line_ > 0) {
+                    size_t prev_len = lines[selected_line_ - 1].text.size();
+                    lines[selected_line_ - 1].text += line.text;
+                    lines.erase(lines.begin() + static_cast<ptrdiff_t>(selected_line_));
+                    selected_line_--;
+                    cursor_col_ = prev_len;
+                }
+            }
+            break;
+        }
+
+        case KEY_DC: {
+            if (selected_line_ < lines.size()) {
+                auto& line = lines[selected_line_];
+                if (cursor_col_ < line.text.size()) {
+                    line.text.erase(cursor_col_, 1);
+                } else if (selected_line_ + 1 < lines.size()) {
+                    line.text += lines[selected_line_ + 1].text;
+                    lines.erase(lines.begin() + static_cast<ptrdiff_t>(selected_line_ + 1));
+                }
+            }
+            break;
+        }
+
+        default:
+            if (ch >= 32 && ch <= 126 && selected_line_ < lines.size()) {
+                lines[selected_line_].text.insert(lines[selected_line_].text.begin() + static_cast<ptrdiff_t>(cursor_col_), static_cast<char>(ch));
+                cursor_col_++;
+            }
+            break;
+    }
+}
+
+void App::handle_sync_input(int ch) {
     switch (ch) {
         case 'q':
         case 'Q':
             running_ = false;
             break;
+
+        case 'e':
+        case 'E': {
+            std::lock_guard lock(g_app_mutex);
+            enter_edit_mode();
+            break;
+        }
 
         case ' ':
             player_.toggle_play_pause();
@@ -343,6 +514,17 @@ void App::handle_input(int ch) {
     }
 }
 
+void App::handle_input(int ch) {
+    if (ch == ERR) return;
+
+    if (mode_ == AppMode::Edit) {
+        std::lock_guard lock(g_app_mutex);
+        handle_edit_input(ch);
+    } else {
+        handle_sync_input(ch);
+    }
+}
+
 void App::run() {
     while (running_) {
         int ch = getch();
@@ -350,8 +532,7 @@ void App::run() {
 
         {
             std::lock_guard lock(g_app_mutex);
-            // Render views
-            editor_view_.render(editor_win_, doc_, selected_line_, player_.get_position());
+            // Render player view
             player_view_.render(player_win_, player_, doc_);
 
             // Render status bar
@@ -360,6 +541,9 @@ void App::run() {
             mvwprintw(status_win_, 0, 0, " %s", status_message_.c_str());
             wattroff(status_win_, A_REVERSE);
             wrefresh(status_win_);
+
+            // Render editor view last so cursor stays placed inside the editor
+            editor_view_.render(editor_win_, doc_, selected_line_, cursor_col_, mode_ == AppMode::Edit);
         }
 
         // Target ~30 FPS
