@@ -44,6 +44,8 @@ void PlayerView::render(WINDOW* win, const audio::AudioPlayer& player, const cor
     // Keybindings Cheat-Sheet
     int help_y = 12;
     mvwprintw(win, help_y++, 2, "Keybindings");
+    mvwprintw(win, help_y++, 2, "v         : Preview mode");
+    mvwprintw(win, help_y++, 2, "m         : Edit Metadata tags");
     mvwprintw(win, help_y++, 2, "e         : Toggle Edit / Sync Mode");
     mvwprintw(win, help_y++, 2, "o / Ctrl+V: Paste lyrics from clipboard");
     mvwprintw(win, help_y++, 2, "Space     : Play / Pause");

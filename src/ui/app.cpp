@@ -292,12 +292,41 @@ void App::handle_sync_input(int ch) {
             break;
         }
 
+        // Metadata popup
+        case 'm':
+        case 'M': {
+            std::lock_guard lock(g_app_mutex);
+            if (popup_manager_.show_metadata_dialog(doc_)) {
+                status_message_ = "Updated LRC metadata tags.";
+            } else {
+                status_message_ = "Metadata edit cancelled.";
+            }
+            break;
+        }
+
+        // Toggle preview mode
+        case 'v':
+        case 'V': {
+            is_preview_mode_ = !is_preview_mode_;
+            if (is_preview_mode_) {
+                if (player_.get_state() != audio::PlayerState::Playing) {
+                    player_.play();
+                }
+                status_message_ = "Preview Mode ON";
+            } else {
+                status_message_ = "Preview Mode OFF";
+            }
+            break;
+        }
+
         case ' ':
+            is_preview_mode_ = false;
             player_.toggle_play_pause();
             break;
 
         case KEY_DOWN:
         case 'j': {
+            is_preview_mode_ = false;
             std::lock_guard lock(g_app_mutex);
             if (selected_line_ + 1 < doc_.lines().size()) {
                 selected_line_++;
@@ -307,6 +336,7 @@ void App::handle_sync_input(int ch) {
 
         case KEY_UP:
         case 'k': {
+            is_preview_mode_ = false;
             std::lock_guard lock(g_app_mutex);
             if (selected_line_ > 0) {
                 selected_line_--;
@@ -421,6 +451,14 @@ void App::handle_sync_input(int ch) {
                 break;
             }
 
+            // If metadata is missing, prompt user first
+            if (!doc_.get_tag("ti").has_value() || !doc_.get_tag("ar").has_value() || doc_.get_tag("ar")->empty()) {
+                if (!popup_manager_.show_metadata_dialog(doc_)) {
+                    status_message_ = "Fetch cancelled.";
+                    break;
+                }
+            }
+
             g_network_busy.store(true);
             status_message_ = "Fetching lyrics from LRCLIB...";
 
@@ -465,6 +503,14 @@ void App::handle_sync_input(int ch) {
             if (g_network_busy.load()) {
                 status_message_ = "Network task already running";
                 break;
+            }
+
+            // Ensure Title and Artist are present before solving PoW challenge
+            if (!doc_.get_tag("ti").has_value() || !doc_.get_tag("ar").has_value() || doc_.get_tag("ar")->empty()) {
+                if (!popup_manager_.show_metadata_dialog(doc_)) {
+                    status_message_ = "Publish cancelled.";
+                    break;
+                }
             }
 
             g_network_busy.store(true);
@@ -525,6 +571,33 @@ void App::handle_input(int ch) {
     }
 }
 
+void App::update_preview_tracking() {
+    if (!is_preview_mode_ || mode_ != AppMode::Sync) return;
+    if (player_.get_state() != audio::PlayerState::Playing) return;
+
+    auto current_pos = player_.get_position();
+    const auto& lines = doc_.lines();
+    if (lines.empty()) return;
+
+    size_t active_idx = 0;
+    bool found = false;
+
+    for (size_t i = 0; i < lines.size(); ++i) {
+        if (lines[i].timestamp.has_value()) {
+            if (lines[i].timestamp.value() <= current_pos) {
+                active_idx = i;
+                found = true;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (found) {
+        selected_line_ = active_idx;
+    }
+}
+
 void App::run() {
     while (running_) {
         int ch = getch();
@@ -532,6 +605,8 @@ void App::run() {
 
         {
             std::lock_guard lock(g_app_mutex);
+            update_preview_tracking();
+
             // Render player view
             player_view_.render(player_win_, player_, doc_);
 

@@ -4,6 +4,7 @@
 #include "laya/audio/audio_player.hpp"
 #include "laya/ui/editor_view.hpp"
 #include "laya/ui/player_view.hpp"
+#include "laya/ui/popup_manager.hpp"
 #include <string>
 #include <filesystem>
 
@@ -29,6 +30,7 @@ private:
 
     EditorView editor_view_;
     PlayerView player_view_;
+    PopupManager popup_manager_;
 
     WINDOW* editor_win_{nullptr};
     WINDOW* player_win_{nullptr};
@@ -43,8 +45,10 @@ private:
     void exit_edit_mode();
     void handle_sync_input(int ch);
     void handle_edit_input(int ch);
+    void update_preview_tracking();
 
     AppMode mode_{AppMode::Sync};
+    bool is_preview_mode_{false};
     size_t selected_line_{0};
     size_t cursor_col_{0};
     std::vector<core::LrcLine> original_snapshot_;

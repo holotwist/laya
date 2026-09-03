@@ -27,6 +27,7 @@ add_library(laya_core
     src/net/lrclib_client.cpp
     src/audio/miniaudio_impl.cpp
     src/audio/audio_player.cpp
+    src/ui/popup_manager.cpp
     src/ui/app.cpp
     src/ui/editor_view.cpp
     src/ui/player_view.cpp
