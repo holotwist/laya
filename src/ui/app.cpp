@@ -532,7 +532,7 @@ void App::handle_sync_input(int ch) {
                     plain_lyrics = extract_plain_lyrics(doc_);
                 }
 
-                bool success = client.publish_lyrics(
+                auto [success, detail_msg] = client.publish_lyrics(
                     meta,
                     plain_lyrics,
                     synced_lyrics,
@@ -543,11 +543,7 @@ void App::handle_sync_input(int ch) {
                 );
 
                 std::lock_guard lock(g_app_mutex);
-                if (success) {
-                    status_message_ = "Successfully published to LRCLIB";
-                } else {
-                    status_message_ = "Failed to publish to LRCLIB.";
-                }
+                status_message_ = detail_msg;
 
                 g_network_busy.store(false);
             }).detach();

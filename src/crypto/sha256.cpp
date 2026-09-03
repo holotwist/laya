@@ -87,6 +87,8 @@ void Sha256::update(std::string_view data) {
 }
 
 Hash256 Sha256::finalize() {
+    uint64_t total_bits = count_ * 8; // Save exact message bit length before padding
+
     uint8_t pad = 0x80;
     update(&pad, 1);
 
@@ -95,12 +97,9 @@ Hash256 Sha256::finalize() {
         update(&zero, 1);
     }
 
-    uint64_t bit_len = (count_ - 1 - ((count_ - 1) % 64 >= 56 ? 64 - (count_ - 1) % 64 + 56 : 56 - (count_ - 1) % 64)) * 8;
-    bit_len = (count_ - 1) * 8; // Adjust bit length
-
     uint8_t len_bytes[8];
     for (int i = 0; i < 8; ++i) {
-        len_bytes[7 - i] = static_cast<uint8_t>(bit_len >> (i * 8));
+        len_bytes[7 - i] = static_cast<uint8_t>(total_bits >> (i * 8));
     }
     update(len_bytes, 8);
 

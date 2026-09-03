@@ -113,7 +113,7 @@ std::optional<LyricsResult> LrclibClient::get_lyrics(const TrackMetadata& meta) 
     return std::nullopt;
 }
 
-bool LrclibClient::publish_lyrics(
+std::pair<bool, std::string> LrclibClient::publish_lyrics(
     const TrackMetadata& meta,
     const std::string& plain_lyrics,
     const std::string& synced_lyrics,
@@ -124,7 +124,9 @@ bool LrclibClient::publish_lyrics(
     // Request Challenge
     std::string challenge_url = std::string(BASE_URL) + "/request-challenge";
     auto [code, body] = http_post(challenge_url, "{}");
-    if (code != 200 && code != 201) return false;
+    if (code != 200 && code != 201) {
+        return {false, "Failed to connect to LRCLIB challenge server (HTTP " + std::to_string(code) + ")"};
+    }
 
     std::string prefix, target;
     try {
@@ -132,7 +134,7 @@ bool LrclibClient::publish_lyrics(
         prefix = j.at("prefix").get<std::string>();
         target = j.at("target").get<std::string>();
     } catch (...) {
-        return false;
+        return {false, "Malformed challenge response from LRCLIB."};
     }
 
     // Solve PoW Challenge
@@ -143,14 +145,16 @@ bool LrclibClient::publish_lyrics(
         }
     });
 
-    if (!publish_token.has_value()) return false;
+    if (!publish_token.has_value()) {
+        return {false, "Failed to solve PoW challenge."};
+    }
 
     // Publish to LRCLIB
     if (status_cb) status_cb("Submitting lyrics to LRCLIB");
     json payload = {
         {"trackName", meta.track_name},
         {"artistName", meta.artist_name},
-        {"albumName", meta.album_name},
+        {"albumName", meta.album_name.empty() ? meta.track_name : meta.album_name},
         {"duration", meta.duration_seconds},
         {"plainLyrics", plain_lyrics},
         {"syncedLyrics", synced_lyrics}
@@ -159,7 +163,19 @@ bool LrclibClient::publish_lyrics(
     std::string publish_url = std::string(BASE_URL) + "/publish";
     auto [pub_code, pub_body] = http_post(publish_url, payload.dump(), publish_token.value());
 
-    return (pub_code == 200 || pub_code == 201);
+    if (pub_code == 200 || pub_code == 201) {
+        return {true, "Successfully published to LRCLIB"};
+    }
+
+    // Parse server error message if available
+    try {
+        auto err_json = json::parse(pub_body);
+        if (err_json.contains("message")) {
+            return {false, "LRCLIB Error: " + err_json["message"].get<std::string>()};
+        }
+    } catch (...) {}
+
+    return {false, "Failed to publish (HTTP " + std::to_string(pub_code) + ")"};
 }
 
 } // namespace laya::net

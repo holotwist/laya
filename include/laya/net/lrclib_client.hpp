@@ -37,7 +37,8 @@ public:
     std::vector<LyricsResult> search_lyrics(const std::string& query);
 
     // Request challenge, solve PoW, and publish lyrics to LRCLIB
-    bool publish_lyrics(
+    // Returns pair of <success, detailed_message>
+    std::pair<bool, std::string> publish_lyrics(
         const TrackMetadata& meta,
         const std::string& plain_lyrics,
         const std::string& synced_lyrics,
