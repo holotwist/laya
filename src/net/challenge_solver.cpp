@@ -44,7 +44,7 @@ std::optional<std::string> ChallengeSolver::solve(
                 auto hash_res = crypto::Sha256::hash(combined);
                 std::string hash_hex = crypto::Sha256::to_hex(hash_res);
 
-                // Check condition: hash_hex <= target_hex
+                // Check condition, hash_hex <= target_hex
                 if (hash_hex <= target_lower) {
                     found.store(true, std::memory_order_relaxed);
                     std::lock_guard lock(nonce_mutex);

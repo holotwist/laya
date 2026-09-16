@@ -5,7 +5,7 @@ namespace laya::ui {
 void PlayerView::render(WINDOW* win, const audio::AudioPlayer& player, const core::LrcDocument& doc) {
     werase(win);
     box(win, 0, 0);
-    mvwprintw(win, 0, 2, " [ Mini Player & Controls ] ");
+    mvwprintw(win, 0, 2, " [ Player and controls ] ");
 
     int width = getmaxx(win);
 
@@ -23,7 +23,7 @@ void PlayerView::render(WINDOW* win, const audio::AudioPlayer& player, const cor
               core::format_timestamp(pos).c_str(), 
               core::format_timestamp(dur).c_str());
 
-    // Progress Bar
+    // Progress bar
     int bar_width = width - 6;
     if (bar_width > 4 && dur.count() > 0) {
         float progress = static_cast<float>(pos.count()) / static_cast<float>(dur.count());
@@ -41,7 +41,7 @@ void PlayerView::render(WINDOW* win, const audio::AudioPlayer& player, const cor
     mvwprintw(win, 9, 2, "Artist: %s", doc.get_tag("ar").value_or("N/A").c_str());
     mvwprintw(win, 10, 2, "Album : %s", doc.get_tag("al").value_or("N/A").c_str());
 
-    // Keybindings Cheat-Sheet
+    // Keybindings
     int help_y = 12;
     mvwprintw(win, help_y++, 2, "Keybindings");
     mvwprintw(win, help_y++, 2, "v         : Preview mode");

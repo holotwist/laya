@@ -63,7 +63,7 @@ App::App(std::filesystem::path audio_path, std::filesystem::path lrc_path)
         doc_.load_from_file(lrc_path_);
     }
 
-    // Load Audio
+    // Load audio
     if (std::filesystem::exists(audio_path_)) {
         player_.load_file(audio_path_);
     }
@@ -111,7 +111,7 @@ void App::update_layout() {
     if (status_win_) delwin(status_win_);
 
     int main_height = max_y - 1;
-    int split_x = (max_x * 6) / 10; // 60% Left Editor, 40% Right Player
+    int split_x = (max_x * 6) / 10; // 60% Left editor, 40% right player
 
     editor_win_ = newwin(main_height, split_x, 0, 0);
     player_win_ = newwin(main_height, max_x - split_x, 0, split_x);
@@ -427,7 +427,7 @@ void App::handle_sync_input(int ch) {
             break;
         }
 
-        // Paste / Open lyrics from System Clipboard (o or Ctrl+V)
+        // Paste / Open lyrics from system clipboard (o or Ctrl+V)
         case 'o':
         case 'O':
         case 22: { // ASCII 22 = Ctrl+V
@@ -483,7 +483,7 @@ void App::handle_sync_input(int ch) {
                         status_message_ = "Loaded synced lyrics from LRCLIB!";
                     } else if (!result->plain_lyrics.empty()) {
                         doc_.parse_content(result->plain_lyrics);
-                        status_message_ = "Loaded unsynced lyrics from LRCLIB (Ready to sync).";
+                        status_message_ = "Loaded unsynced lyrics from LRCLIB.";
                     } else {
                         status_message_ = "Track found on LRCLIB but has no lyrics.";
                     }

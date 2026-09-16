@@ -47,6 +47,6 @@ target_link_libraries(laya_core PUBLIC
     m
 )
 
-# Executable Target
+# Executable target
 add_executable(laya src/main.cpp)
 target_link_libraries(laya PRIVATE laya_core)
